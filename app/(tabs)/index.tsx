@@ -1,98 +1,90 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
+import { Platform, StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [latestText, setLatestText] = useState('');
+  const [intervalMs] = useState(3000);
+  const serverUrl = 'http://172.31.44.253:5000/api/scan';
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
+  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+
+  useEffect(() => {
+    if (!permission?.granted && permission !== null) {
+      requestPermission();
+    }
+  }, [permission, requestPermission]);
+
+  useEffect(() => {
+    let timer: any;
+    if (isCapturing) {
+      timer = setInterval(() => captureAndSend(), intervalMs);
+    }
+    return () => clearInterval(timer);
+  }, [isCapturing, intervalMs]);
+
+  async function captureAndSend() {
+    if (!cameraRef.current) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 1.0 });
+      if (!photo || !photo.base64) return;
+      const res = await fetch(serverUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: photo.base64 }),
+      });
+      const json = await res.json();
+      if (json && json.text) setLatestText(json.text);
+    } catch (err: any) {
+      console.warn('Capture/send error:', err?.message ?? err);
+    }
+  }
+
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.cameraWrapper}>
+        {Platform.OS === 'web' ? (
+          <ThemedText>Camera preview unavailable on web.</ThemedText>
+        ) : (
+          <CameraView style={styles.camera} ref={cameraRef} facing="back" />
+        )}
+      </View>
+
+      <View style={styles.controls}>
+        <TouchableOpacity
+          style={styles.button}
+          onPress={() => setIsCapturing((v) => !v)}>
+          <ThemedText type="defaultSemiBold" style={styles.buttonText}>
+            {isCapturing ? 'Stop Scanning' : 'Start Scanning'}
+          </ThemedText>
+        </TouchableOpacity>
+
+        <ThemedText type="subtitle" style={styles.description}>
+          Point your camera at text on another screen and press Start. The app will capture images
+          periodically and extract text.
         </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+
+        <ThemedText style={styles.latest}>
+          {latestText ? `Latest: ${latestText.substring(0, 120)}` : 'No text captured yet.'}
         </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      </View>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  container: { flex: 1, backgroundColor: '#fff', justifyContent: 'center' },
+  cameraWrapper: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  camera: { width: '100%', height: '100%' },
+  controls: { padding: 20, backgroundColor: '#f7f7f7' },
+  button: { backgroundColor: '#0a84ff', padding: 14, borderRadius: 10, alignItems: 'center' },
+  buttonText: { color: '#fff' },
+  description: { marginTop: 12, color: '#333', lineHeight: 20 },
+  latest: { marginTop: 10, color: '#666', fontSize: 13 },
 });
